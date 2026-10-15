@@ -420,11 +420,12 @@
 
     document.querySelector('#item-form').addEventListener('submit', async (event) => {
       event.preventDefault();
-      const form = new FormData(event.currentTarget);
+      const itemForm = event.currentTarget;
+      const form = new FormData(itemForm);
       const error = document.querySelector('#item-error');
       try {
         await api('/api/items', { method: 'POST', body: JSON.stringify(Object.fromEntries(form)) });
-        event.currentTarget.reset();
+        itemForm.reset();
         await Promise.all([refreshItems(), refreshAdmin()]);
         showToast('Dodano przedmiot do wyprzedaży.');
       } catch (failure) {
