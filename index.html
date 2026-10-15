@@ -250,9 +250,6 @@
     let adminItems = [];
     let activeItemId = null;
     let editingItemId = null;
-    let reservationSubmitting = false;
-    let itemsRefreshPromise = null;
-    let adminRefreshPromise = null;
     let toastTimer;
     let adminPin = '';
 
@@ -392,62 +389,26 @@
       }).join('');
     }
 
-    function refreshItems() {
-      if (itemsRefreshPromise) return itemsRefreshPromise;
-      itemsRefreshPromise = (async () => {
-        items = await api('/api/items');
-        const categories = [...new Set(items.map((item) => item.category))].sort();
-        const current = categoryFilter.value;
-        categoryFilter.innerHTML = '<option value="all">Wszystkie</option>' + categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('');
-        if (categories.includes(current)) categoryFilter.value = current;
-        renderItems();
-        if (reservationDialog.open && activeItemId) {
-          const item = items.find((entry) => entry.id === activeItemId);
-          if (!item || (item.availableQuantity === 0 && !reservationSubmitting)) {
-            reservationDialog.close();
-            showToast('Wszystkie sztuki tego przedmiotu zostały już zarezerwowane.', true);
-          } else if (item && item.availableQuantity > 0) {
-            const quantityInput = document.querySelector('#reserve-quantity');
-            quantityInput.max = String(item.availableQuantity);
-            quantityInput.value = String(Math.min(Number(quantityInput.value) || 1, item.availableQuantity));
-            document.querySelector('#reserve-quantity-hint').textContent = `Dostępnych sztuk: ${item.availableQuantity}.`;
-          }
-        }
-      })().finally(() => {
-        itemsRefreshPromise = null;
-      });
-      return itemsRefreshPromise;
+    async function refreshItems() {
+      items = await api('/api/items');
+      const categories = [...new Set(items.map((item) => item.category))].sort();
+      const current = categoryFilter.value;
+      categoryFilter.innerHTML = '<option value="all">Wszystkie</option>' + categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('');
+      if (categories.includes(current)) categoryFilter.value = current;
+      renderItems();
     }
 
-    async function syncItems() {
-      if (!supabaseConfigured || document.visibilityState !== 'visible') return;
-      try {
-        await Promise.all([
-          refreshItems(),
-          adminDialog.open ? refreshAdmin() : Promise.resolve(),
-        ]);
-      } catch (failure) {
-        showToast(`Nie udało się odświeżyć dostępności: ${failure.message}`, true);
-      }
-    }
-
-    function refreshAdmin() {
-      if (adminRefreshPromise) return adminRefreshPromise;
-      adminRefreshPromise = (async () => {
-        const [reservations, currentItems] = await Promise.all([api('/api/reservations'), api('/api/items')]);
-        adminItems = currentItems;
-        document.querySelector('#reservation-count').textContent = reservations.length ? `${reservations.length}` : '0';
-        document.querySelector('#reservation-list').innerHTML = reservations.length
-          ? reservations.map((reservation) => `<div class="reservation-row"><div><strong>${escapeHtml(reservation.itemName)} · ${reservation.quantity} szt.</strong><span>${escapeHtml(reservation.name)} · ${escapeHtml(reservation.contact)}</span></div><button class="release-button" type="button" data-release="${escapeHtml(reservation.id)}">Anuluj</button></div>`).join('')
-          : '<p class="no-reservations">Brak rezerwacji.</p>';
-        document.querySelector('#inventory-count').textContent = `${currentItems.length}`;
-        document.querySelector('#inventory-list').innerHTML = currentItems.length
-          ? currentItems.map((item) => `<div class="reservation-row"><div><strong>${escapeHtml(item.name)}</strong><span>${item.availableQuantity} dostępne z ${item.quantity} szt. · ${item.price === null ? 'cena do uzgodnienia' : item.price === 0 ? 'bezpłatnie' : item.price.toLocaleString('pl-PL', { style: 'currency', currency: 'PLN' })} · ${escapeHtml(item.category)}</span></div><div class="inventory-actions"><button class="release-button" type="button" data-edit-item="${escapeHtml(item.id)}">Edytuj</button><button class="release-button" type="button" data-delete-item="${escapeHtml(item.id)}" ${item.availableQuantity !== item.quantity ? 'disabled title="Najpierw anuluj wszystkie rezerwacje"' : ''}>Usuń</button></div></div>`).join('')
-          : '<p class="no-reservations">Brak wystawionych przedmiotów.</p>';
-      })().finally(() => {
-        adminRefreshPromise = null;
-      });
-      return adminRefreshPromise;
+    async function refreshAdmin() {
+      const [reservations, currentItems] = await Promise.all([api('/api/reservations'), api('/api/items')]);
+      adminItems = currentItems;
+      document.querySelector('#reservation-count').textContent = reservations.length ? `${reservations.length}` : '0';
+      document.querySelector('#reservation-list').innerHTML = reservations.length
+        ? reservations.map((reservation) => `<div class="reservation-row"><div><strong>${escapeHtml(reservation.itemName)} · ${reservation.quantity} szt.</strong><span>${escapeHtml(reservation.name)} · ${escapeHtml(reservation.contact)}</span></div><button class="release-button" type="button" data-release="${escapeHtml(reservation.id)}">Anuluj</button></div>`).join('')
+        : '<p class="no-reservations">Brak rezerwacji.</p>';
+      document.querySelector('#inventory-count').textContent = `${currentItems.length}`;
+      document.querySelector('#inventory-list').innerHTML = currentItems.length
+        ? currentItems.map((item) => `<div class="reservation-row"><div><strong>${escapeHtml(item.name)}</strong><span>${item.availableQuantity} dostępne z ${item.quantity} szt. · ${item.price === null ? 'cena do uzgodnienia' : item.price === 0 ? 'bezpłatnie' : item.price.toLocaleString('pl-PL', { style: 'currency', currency: 'PLN' })} · ${escapeHtml(item.category)}</span></div><div class="inventory-actions"><button class="release-button" type="button" data-edit-item="${escapeHtml(item.id)}">Edytuj</button><button class="release-button" type="button" data-delete-item="${escapeHtml(item.id)}" ${item.availableQuantity !== item.quantity ? 'disabled title="Najpierw anuluj wszystkie rezerwacje"' : ''}>Usuń</button></div></div>`).join('')
+        : '<p class="no-reservations">Brak wystawionych przedmiotów.</p>';
     }
 
     itemGrid.addEventListener('click', (event) => {
@@ -470,7 +431,6 @@
       event.preventDefault();
       const form = new FormData(event.currentTarget);
       const error = document.querySelector('#reservation-error');
-      reservationSubmitting = true;
       try {
         await api('/api/reservations', { method: 'POST', body: JSON.stringify({ itemId: activeItemId, name: form.get('name'), contact: form.get('contact'), quantity: Number(form.get('quantity')) }) });
         reservationDialog.close();
@@ -478,16 +438,7 @@
         showToast('Zarezerwowano. Sprzedający skontaktuje się w sprawie odbioru.');
       } catch (failure) {
         error.textContent = failure.message;
-        if (failure.message.includes('zarezerwowany') || failure.message.includes('dostępny')) {
-          await refreshItems();
-          const item = items.find((entry) => entry.id === activeItemId);
-          if (!item || item.availableQuantity === 0) {
-            reservationDialog.close();
-            showToast('Wszystkie sztuki tego przedmiotu zostały już zarezerwowane.', true);
-          }
-        }
-      } finally {
-        reservationSubmitting = false;
+        if (failure.message.includes('zarezerwowany')) await refreshItems();
       }
     });
 
@@ -608,9 +559,6 @@
     });
     searchInput.addEventListener('input', renderItems);
     categoryFilter.addEventListener('change', renderItems);
-    window.addEventListener('focus', syncItems);
-    document.addEventListener('visibilitychange', syncItems);
-    setInterval(syncItems, 15000);
 
     refreshItems().catch((failure) => {
       document.querySelector('#result-count').textContent = 'Wyprzedaż niedostępna';
