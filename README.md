@@ -26,6 +26,6 @@ In the GitHub repository, open **Settings → Secrets and variables → Actions*
 - `SUPABASE_URL`: `https://zqllbflaxblvytxlihci.supabase.co`
 - `SUPABASE_PUBLISHABLE_KEY`: the project's publishable key
 
-The Pages workflow deploys the site when changes are pushed to `main`. It requires both secrets and generates `supabase-config.js` during deployment. Publishable keys are meant for browser use; never expose the `service_role` key.
+The Pages workflow deploys the site when changes are pushed to `main`. It requires both secrets, generates `supabase-config.js`, and publishes the repository's `images/` folder with the site. Use direct image URLs, such as `https://omirek.github.io/garagesale/images/peszel.jpg`, rather than a GitHub file preview page. Publishable keys are meant for browser use; never expose the `service_role` key.
 
 The migration enables row-level security, allows public visitors to read listed items and create reservations, and denies public access to reservation contact details and inventory changes. A database trigger and unique index prevent duplicate active reservations. PIN failures are throttled to five attempts per 15 minutes per client.

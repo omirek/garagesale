@@ -33,6 +33,7 @@ jobs:
           test -n "$SUPABASE_PUBLISHABLE_KEY" || { echo "Missing repository secret SUPABASE_PUBLISHABLE_KEY"; exit 1; }
           mkdir dist
           cp index.html dist/index.html
+          cp -R images dist/images
           node -e 'require("node:fs").writeFileSync("dist/supabase-config.js", "window.GARAGE_CONFIG = " + JSON.stringify({ url: process.env.SUPABASE_URL, publishableKey: process.env.SUPABASE_PUBLISHABLE_KEY }) + ";\n")'
       - uses: actions/upload-pages-artifact@v3
         with:
