@@ -66,6 +66,8 @@
     .item-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
     .item-title { margin: 6px 0 4px; font: 26px/1.16 var(--serif); }
     .item-description { min-height: 44px; margin: 0; color: var(--muted); font-size: 13px; }
+    .item-price { margin: 10px 0 2px; font-size: 16px; font-weight: 750; }
+    .item-availability { margin: 0; color: var(--muted); font-size: 12px; }
     .item-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--line); }
     .reserve-button { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; border: 0; padding: 0 12px; background: var(--green); color: white; font-size: 12px; font-weight: 700; transition: background .15s; }
     .reserve-button:hover:not(:disabled) { background: var(--green-dark); }
@@ -100,6 +102,7 @@
     .section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 0 0 10px; font: 21px/1.2 var(--serif); }
     .section-heading small { color: var(--muted); font: 11px var(--sans); }
     .reservation-list { display: grid; gap: 8px; }
+    .inventory-actions { flex: 0 0 auto; display: flex; gap: 6px; }
     .reservation-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; border: 1px solid var(--line); padding: 10px 11px; }
     .reservation-row strong { display: block; font-size: 12px; }
     .reservation-row span { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
@@ -182,6 +185,7 @@
     <form class="dialog-body form-stack" id="reservation-form">
       <div class="field"><label for="reserve-name">Imię i nazwisko</label><input id="reserve-name" name="name" autocomplete="name" maxlength="80" required></div>
       <div class="field"><label for="reserve-contact">Telefon lub e-mail</label><input id="reserve-contact" name="contact" autocomplete="email" maxlength="120" required><span class="field-hint">Skontaktujemy się w sprawie odbioru.</span></div>
+      <div class="field"><label for="reserve-quantity">Liczba sztuk</label><input id="reserve-quantity" name="quantity" type="number" min="1" step="1" value="1" required><span class="field-hint" id="reserve-quantity-hint"></span></div>
       <p class="form-error" id="reservation-error" role="alert"></p>
       <button class="submit-button" type="submit">Zarezerwuj do odbioru</button>
     </form>
@@ -199,10 +203,13 @@
           <div class="field"><label for="item-name">Nazwa przedmiotu</label><input id="item-name" name="name" maxlength="80" required></div>
           <div class="field"><label for="item-category">Kategoria</label><select id="item-category" name="category"><option>Dom</option><option>Meble</option><option>Ubrania</option><option>Książki</option><option>Kuchnia</option><option>Dzieci</option><option>Ogród</option><option>Inne</option></select></div>
           <div class="field"><label for="item-condition">Stan</label><select id="item-condition" name="condition"><option>Jak nowy</option><option>Dobry</option><option>Używany</option><option>Na części</option></select></div>
+          <div class="field"><label for="item-price">Cena (zł)</label><input id="item-price" name="price" type="number" min="0" max="99999999.99" step="0.01" placeholder="Cena do uzgodnienia"><span class="field-hint">Pozostaw puste, jeśli cena jest do uzgodnienia.</span></div>
+          <div class="field"><label for="item-quantity">Liczba sztuk</label><input id="item-quantity" name="quantity" type="number" min="1" max="2147483647" step="1" value="1" required></div>
           <div class="field"><label for="item-description">Kilka szczegółów</label><textarea id="item-description" name="description" maxlength="500" placeholder="Wymiary, rozmiar lub inne przydatne informacje..."></textarea></div>
           <div class="field"><label for="item-image">Link do zdjęcia <span class="field-hint">(opcjonalnie)</span></label><input id="item-image" name="imageUrl" type="url" placeholder="https://..."></div>
           <p class="form-error" id="item-error" role="alert"></p>
-          <button class="submit-button" type="submit">Dodaj do wyprzedaży</button>
+          <button class="submit-button" id="item-submit" type="submit">Dodaj do wyprzedaży</button>
+          <button class="button" id="cancel-item-edit" type="button" hidden>Anuluj edycję</button>
         </form>
       </section>
       <section class="admin-section" aria-labelledby="reservations-heading">
@@ -240,7 +247,9 @@
     const supabaseConfig = window.GARAGE_CONFIG || {};
     const supabaseConfigured = Boolean(supabaseConfig.url && supabaseConfig.publishableKey);
     let items = [];
+    let adminItems = [];
     let activeItemId = null;
+    let editingItemId = null;
     let toastTimer;
     let adminPin = '';
 
@@ -300,7 +309,7 @@
       const body = options.body ? JSON.parse(options.body) : {};
 
       if (method === 'GET' && pathname === '/api/items') {
-        const rows = await supabaseRequest('items?select=id,name,category,condition,description,image_url,is_reserved,created_at&is_listed=eq.true&order=created_at.desc');
+        const rows = await supabaseRequest('items?select=id,name,category,condition,description,image_url,price,quantity,available_quantity,is_reserved,created_at&is_listed=eq.true&order=created_at.desc');
         return rows.map((item) => ({
           id: item.id,
           name: item.name,
@@ -308,17 +317,23 @@
           condition: item.condition,
           description: item.description,
           imageUrl: item.image_url,
+          price: item.price === null ? null : Number(item.price),
+          quantity: item.quantity,
+          availableQuantity: item.available_quantity,
           reserved: item.is_reserved,
           createdAt: item.created_at,
         }));
       }
       if (method === 'GET' && pathname === '/api/reservations') return supabaseAdmin('list-reservations');
       if (method === 'POST' && pathname === '/api/items') return supabaseAdmin('add-item', { item: body });
+      if (method === 'PUT' && pathname.startsWith('/api/items/')) {
+        return supabaseAdmin('update-item', { id: decodeURIComponent(pathname.slice('/api/items/'.length)), item: body });
+      }
       if (method === 'POST' && pathname === '/api/reservations') {
         return supabaseRequest('reservations', {
           method: 'POST',
           headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify({ item_id: body.itemId, name: body.name, contact: body.contact }),
+          body: JSON.stringify({ item_id: body.itemId, name: body.name, contact: body.contact, quantity: body.quantity }),
         });
       }
 
@@ -366,7 +381,11 @@
         const image = item.imageUrl
           ? `<img src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.name)}" loading="lazy" onerror="this.remove()">`
           : `<div class="image-placeholder" aria-hidden="true"><span>${escapeHtml(item.name.trim().charAt(0).toUpperCase())}</span></div>`;
-        return `<article class="item-card" style="animation-delay:${Math.min(index * 45, 225)}ms"><div class="item-image">${image}<span class="status${item.reserved ? ' reserved' : ''}">${item.reserved ? 'Zarezerwowany' : escapeHtml(item.condition)}</span></div><div class="item-details"><div class="item-meta"><span>${escapeHtml(item.category)}</span></div><h2 class="item-title">${escapeHtml(item.name)}</h2><p class="item-description">${escapeHtml(item.description || 'Przedmiot szuka nowego domu.')}</p><div class="item-actions"><button class="reserve-button" type="button" data-reserve="${escapeHtml(item.id)}" ${item.reserved ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" stroke-linecap="round" stroke-linejoin="round"/></svg>${item.reserved ? 'Zarezerwowany' : 'Zarezerwuj'}</button><span class="pickup-note">Odbiór osobisty · bez płatności</span></div></div></article>`;
+        const price = item.price === null ? 'Cena do uzgodnienia' : item.price === 0 ? 'Bezpłatnie' : item.price.toLocaleString('pl-PL', { style: 'currency', currency: 'PLN' });
+        const availability = item.availableQuantity === 0
+          ? 'Wszystkie sztuki zarezerwowane'
+          : `Dostępne sztuki: ${item.availableQuantity}`;
+        return `<article class="item-card" style="animation-delay:${Math.min(index * 45, 225)}ms"><div class="item-image">${image}<span class="status${item.reserved ? ' reserved' : ''}">${item.reserved ? 'Zarezerwowany' : escapeHtml(item.condition)}</span></div><div class="item-details"><div class="item-meta"><span>${escapeHtml(item.category)}</span></div><h2 class="item-title">${escapeHtml(item.name)}</h2><p class="item-description">${escapeHtml(item.description || 'Przedmiot szuka nowego domu.')}</p><p class="item-price">${escapeHtml(price)}</p><p class="item-availability">${escapeHtml(availability)}</p><div class="item-actions"><button class="reserve-button" type="button" data-reserve="${escapeHtml(item.id)}" ${item.reserved ? 'disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" stroke-linecap="round" stroke-linejoin="round"/></svg>${item.reserved ? 'Zarezerwowany' : 'Zarezerwuj'}</button><span class="pickup-note">Odbiór osobisty</span></div></div></article>`;
       }).join('');
     }
 
@@ -381,13 +400,14 @@
 
     async function refreshAdmin() {
       const [reservations, currentItems] = await Promise.all([api('/api/reservations'), api('/api/items')]);
+      adminItems = currentItems;
       document.querySelector('#reservation-count').textContent = reservations.length ? `${reservations.length}` : '0';
       document.querySelector('#reservation-list').innerHTML = reservations.length
-        ? reservations.map((reservation) => `<div class="reservation-row"><div><strong>${escapeHtml(reservation.itemName)}</strong><span>${escapeHtml(reservation.name)} · ${escapeHtml(reservation.contact)}</span></div><button class="release-button" type="button" data-release="${escapeHtml(reservation.id)}">Anuluj</button></div>`).join('')
+        ? reservations.map((reservation) => `<div class="reservation-row"><div><strong>${escapeHtml(reservation.itemName)} · ${reservation.quantity} szt.</strong><span>${escapeHtml(reservation.name)} · ${escapeHtml(reservation.contact)}</span></div><button class="release-button" type="button" data-release="${escapeHtml(reservation.id)}">Anuluj</button></div>`).join('')
         : '<p class="no-reservations">Brak rezerwacji.</p>';
       document.querySelector('#inventory-count').textContent = `${currentItems.length}`;
       document.querySelector('#inventory-list').innerHTML = currentItems.length
-        ? currentItems.map((item) => `<div class="reservation-row"><div><strong>${escapeHtml(item.name)}</strong><span>${item.reserved ? 'Zarezerwowany' : 'Dostępny'} · ${escapeHtml(item.category)}</span></div><button class="release-button" type="button" data-delete-item="${escapeHtml(item.id)}" ${item.reserved ? 'disabled title="Najpierw anuluj rezerwację"' : ''}>Usuń</button></div>`).join('')
+        ? currentItems.map((item) => `<div class="reservation-row"><div><strong>${escapeHtml(item.name)}</strong><span>${item.availableQuantity} dostępne z ${item.quantity} szt. · ${item.price === null ? 'cena do uzgodnienia' : item.price === 0 ? 'bezpłatnie' : item.price.toLocaleString('pl-PL', { style: 'currency', currency: 'PLN' })} · ${escapeHtml(item.category)}</span></div><div class="inventory-actions"><button class="release-button" type="button" data-edit-item="${escapeHtml(item.id)}">Edytuj</button><button class="release-button" type="button" data-delete-item="${escapeHtml(item.id)}" ${item.availableQuantity !== item.quantity ? 'disabled title="Najpierw anuluj wszystkie rezerwacje"' : ''}>Usuń</button></div></div>`).join('')
         : '<p class="no-reservations">Brak wystawionych przedmiotów.</p>';
     }
 
@@ -397,6 +417,10 @@
       activeItemId = button.dataset.reserve;
       const item = items.find((entry) => entry.id === activeItemId);
       document.querySelector('#reservation-item-name').textContent = item ? item.name : '';
+      const quantityInput = document.querySelector('#reserve-quantity');
+      quantityInput.max = String(item?.availableQuantity || 1);
+      quantityInput.value = '1';
+      document.querySelector('#reserve-quantity-hint').textContent = item ? `Dostępnych sztuk: ${item.availableQuantity}.` : '';
       document.querySelector('#reservation-error').textContent = '';
       document.querySelector('#reservation-form').reset();
       reservationDialog.showModal();
@@ -408,13 +432,25 @@
       const form = new FormData(event.currentTarget);
       const error = document.querySelector('#reservation-error');
       try {
-        await api('/api/reservations', { method: 'POST', body: JSON.stringify({ itemId: activeItemId, name: form.get('name'), contact: form.get('contact') }) });
+        await api('/api/reservations', { method: 'POST', body: JSON.stringify({ itemId: activeItemId, name: form.get('name'), contact: form.get('contact'), quantity: Number(form.get('quantity')) }) });
         reservationDialog.close();
         await refreshItems();
         showToast('Zarezerwowano. Sprzedający skontaktuje się w sprawie odbioru.');
       } catch (failure) {
         error.textContent = failure.message;
-        if (failure.message.includes('zarezerwowany')) await refreshItems();
+        if (failure.message.includes('zarezerwowany')) {
+          await refreshItems();
+          const item = items.find((entry) => entry.id === activeItemId);
+          if (item?.availableQuantity > 0) {
+            const quantityInput = document.querySelector('#reserve-quantity');
+            quantityInput.max = String(item.availableQuantity);
+            quantityInput.value = String(Math.min(Number(quantityInput.value) || 1, item.availableQuantity));
+            document.querySelector('#reserve-quantity-hint').textContent = `Dostępnych sztuk: ${item.availableQuantity}.`;
+          } else {
+            reservationDialog.close();
+            showToast('Wszystkie sztuki tego przedmiotu zostały już zarezerwowane.', true);
+          }
+        }
       }
     });
 
@@ -424,13 +460,34 @@
       const form = new FormData(itemForm);
       const error = document.querySelector('#item-error');
       try {
-        await api('/api/items', { method: 'POST', body: JSON.stringify(Object.fromEntries(form)) });
+        const item = Object.fromEntries(form);
+        item.price = item.price === '' ? null : Number(item.price);
+        item.quantity = Number(item.quantity);
+        const wasEditing = Boolean(editingItemId);
+        await api(wasEditing ? `/api/items/${encodeURIComponent(editingItemId)}` : '/api/items', {
+          method: wasEditing ? 'PUT' : 'POST',
+          body: JSON.stringify(item),
+        });
+        resetItemForm();
         itemForm.reset();
         await Promise.all([refreshItems(), refreshAdmin()]);
-        showToast('Dodano przedmiot do wyprzedaży.');
+        showToast(wasEditing ? 'Zapisano zmiany ogłoszenia.' : 'Dodano przedmiot do wyprzedaży.');
       } catch (failure) {
         error.textContent = failure.message;
       }
+    });
+
+    function resetItemForm() {
+      editingItemId = null;
+      document.querySelector('#add-heading').textContent = 'Dodaj przedmiot';
+      document.querySelector('#item-submit').textContent = 'Dodaj do wyprzedaży';
+      document.querySelector('#cancel-item-edit').hidden = true;
+      document.querySelector('#item-error').textContent = '';
+    }
+
+    document.querySelector('#cancel-item-edit').addEventListener('click', () => {
+      document.querySelector('#item-form').reset();
+      resetItemForm();
     });
 
     document.querySelector('#reservation-list').addEventListener('click', async (event) => {
@@ -444,6 +501,29 @@
     });
 
     document.querySelector('#inventory-list').addEventListener('click', async (event) => {
+      const editButton = event.target.closest('[data-edit-item]');
+      if (editButton) {
+        const item = adminItems.find((entry) => entry.id === editButton.dataset.editItem);
+        if (!item) return;
+        editingItemId = item.id;
+        document.querySelector('#add-heading').textContent = 'Edytuj ogłoszenie';
+        document.querySelector('#item-submit').textContent = 'Zapisz zmiany';
+        document.querySelector('#cancel-item-edit').hidden = false;
+        document.querySelector('#item-error').textContent = '';
+        const form = document.querySelector('#item-form');
+        for (const [name, value] of Object.entries({
+          name: item.name,
+          category: item.category,
+          condition: item.condition,
+          price: item.price ?? '',
+          quantity: item.quantity,
+          description: item.description,
+          imageUrl: item.imageUrl,
+        })) form.elements.namedItem(name).value = value;
+        form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        form.elements.namedItem('name').focus();
+        return;
+      }
       const button = event.target.closest('[data-delete-item]');
       if (!button || button.disabled) return;
       try {

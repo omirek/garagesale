@@ -84,7 +84,7 @@ Deno.serve(async (request) => {
 
     if (body.action === "list-reservations") {
       const [reservations, items] = await Promise.all([
-        databaseRequest("reservations?select=id,item_id,name,contact,created_at&released_at=is.null&order=created_at.desc"),
+        databaseRequest("reservations?select=id,item_id,name,contact,quantity,created_at&released_at=is.null&order=created_at.desc"),
         databaseRequest("items?select=id,name&is_listed=eq.true"),
       ]) as [Array<Record<string, unknown>>, Array<Record<string, unknown>>];
       const itemNames = new Map(items.map((item) => [item.id, item.name]));
@@ -94,6 +94,7 @@ Deno.serve(async (request) => {
         itemName: itemNames.get(reservation.item_id) || "Usunięty przedmiot",
         name: reservation.name,
         contact: reservation.contact,
+        quantity: reservation.quantity,
         createdAt: reservation.created_at,
       })));
     }
@@ -102,9 +103,19 @@ Deno.serve(async (request) => {
       const item = body.item || {};
       const name = typeof item.name === "string" ? item.name.trim().slice(0, 80) : "";
       const imageUrl = typeof item.imageUrl === "string" ? item.imageUrl.trim().slice(0, 500) : "";
+      const quantity = item.quantity === undefined ? 1 : Number(item.quantity);
+      const price = item.price === undefined || item.price === null || item.price === ""
+        ? null
+        : Number(item.price);
       if (!name) return jsonResponse(400, { error: "Wpisz nazwę przedmiotu." });
       if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
         return jsonResponse(400, { error: "Link do zdjęcia musi zaczynać się od http:// lub https://." });
+      }
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 2147483647) {
+        return jsonResponse(400, { error: "Liczba sztuk musi być dodatnią liczbą całkowitą." });
+      }
+      if (price !== null && (!Number.isFinite(price) || price < 0 || price > 99999999.99 || Math.round(price * 100) !== price * 100)) {
+        return jsonResponse(400, { error: "Cena musi być nieujemną kwotą z maksymalnie dwoma miejscami po przecinku." });
       }
       await databaseRequest("items", {
         method: "POST",
@@ -115,9 +126,46 @@ Deno.serve(async (request) => {
           condition: typeof item.condition === "string" ? item.condition.trim().slice(0, 40) : "Używany",
           description: typeof item.description === "string" ? item.description.trim().slice(0, 500) : "",
           image_url: imageUrl,
+          price,
+          quantity,
+          available_quantity: quantity,
         }),
       });
       return jsonResponse(201, { ok: true });
+    }
+
+    if (body.action === "update-item") {
+      const item = body.item || {};
+      const name = typeof item.name === "string" ? item.name.trim().slice(0, 80) : "";
+      const imageUrl = typeof item.imageUrl === "string" ? item.imageUrl.trim().slice(0, 500) : "";
+      const quantity = Number(item.quantity);
+      const price = item.price === undefined || item.price === null || item.price === ""
+        ? null
+        : Number(item.price);
+      if (!name) return jsonResponse(400, { error: "Wpisz nazwę przedmiotu." });
+      if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
+        return jsonResponse(400, { error: "Link do zdjęcia musi zaczynać się od http:// lub https://." });
+      }
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 2147483647) {
+        return jsonResponse(400, { error: "Liczba sztuk musi być dodatnią liczbą całkowitą." });
+      }
+      if (price !== null && (!Number.isFinite(price) || price < 0 || price > 99999999.99 || Math.round(price * 100) !== price * 100)) {
+        return jsonResponse(400, { error: "Cena musi być nieujemną kwotą z maksymalnie dwoma miejscami po przecinku." });
+      }
+      await databaseRequest("rpc/admin_update_item", {
+        method: "POST",
+        body: JSON.stringify({
+          p_item_id: body.id,
+          p_name: name,
+          p_category: typeof item.category === "string" ? item.category.trim().slice(0, 40) : "Inne",
+          p_condition: typeof item.condition === "string" ? item.condition.trim().slice(0, 40) : "Używany",
+          p_description: typeof item.description === "string" ? item.description.trim().slice(0, 500) : "",
+          p_image_url: imageUrl,
+          p_price: price,
+          p_quantity: quantity,
+        }),
+      });
+      return jsonResponse(200, { ok: true });
     }
 
     if (body.action === "release-reservation") {
@@ -129,12 +177,10 @@ Deno.serve(async (request) => {
     }
 
     if (body.action === "remove-item") {
-      const result = await databaseRequest(`items?id=eq.${encodeURIComponent(String(body.id))}&is_reserved=eq.false&is_listed=eq.true`, {
-        method: "PATCH",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify({ is_listed: false }),
-      }) as Array<Record<string, unknown>>;
-      if (!result.length) return jsonResponse(409, { error: "Nie można usunąć przedmiotu. Może być już zarezerwowany." });
+      await databaseRequest("rpc/admin_remove_item", {
+        method: "POST",
+        body: JSON.stringify({ p_item_id: body.id }),
+      });
       return jsonResponse(200, { ok: true });
     }
 
@@ -147,6 +193,15 @@ Deno.serve(async (request) => {
     }
     if (error instanceof Error && error.message.includes("RESERVATION_NOT_FOUND")) {
       return jsonResponse(404, { error: "Nie znaleziono aktywnej rezerwacji." });
+    }
+    if (error instanceof Error && error.message.includes("ITEM_QUANTITY_TOO_LOW")) {
+      return jsonResponse(409, { error: "Nie można zmniejszyć liczby sztuk poniżej już zarezerwowanej ilości." });
+    }
+    if (error instanceof Error && error.message.includes("ITEM_HAS_RESERVATIONS")) {
+      return jsonResponse(409, { error: "Najpierw anuluj wszystkie rezerwacje tego przedmiotu." });
+    }
+    if (error instanceof Error && error.message.includes("ITEM_NOT_FOUND")) {
+      return jsonResponse(404, { error: "Nie znaleziono aktywnego ogłoszenia." });
     }
     return jsonResponse(status >= 400 && status < 500 ? status : 500, {
       error: status >= 400 && status < 500 ? "Nie udało się wykonać tej operacji." : "Błąd serwera. Spróbuj ponownie później.",

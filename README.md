@@ -12,10 +12,11 @@ The project is `zqllbflaxblvytxlihci`. To create the database tables from the Su
 
 1. Open the project in the Supabase Dashboard.
 2. Go to **SQL Editor** and create a new query.
-3. Copy the complete contents of [`supabase/migrations/20261015000000_garage_sale.sql`](./supabase/migrations/20261015000000_garage_sale.sql) into the query editor and click **Run**.
-4. Open **Table Editor** and confirm that `items`, `reservations`, and `admin_pin_failures` exist in the `public` schema.
+3. For a new project, copy the complete contents of [`supabase/migrations/20261015000000_garage_sale.sql`](./supabase/migrations/20261015000000_garage_sale.sql) into the query editor and click **Run**.
+4. Copy the complete contents of [`supabase/migrations/20261015010000_item_price_quantity.sql`](./supabase/migrations/20261015010000_item_price_quantity.sql) into a new query and click **Run**. Run this second migration on both new and existing installations.
+5. Open **Table Editor** and confirm that `items`, `reservations`, and `admin_pin_failures` exist in the `public` schema.
 
-This migration also configures the access policies, indexes, triggers, and database functions required by the app. Run it once on a new project; do not rerun it if the tables already exist.
+The first migration creates the tables and configures access policies, indexes, triggers, and functions. Run it only when setting up a new project; do not rerun it if the tables already exist. The second migration adds editable prices and stock quantities and allows a reservation to claim part of the available stock. After running it, redeploy `garage-admin` with the current code.
 
 Next, deploy the admin Edge Function. In **Edge Functions**, deploy a function named `garage-admin` using the code in [`supabase/functions/garage-admin/index.ts`](./supabase/functions/garage-admin/index.ts). In **Edge Functions → Secrets**, set `SUPABASE_SERVICE_ROLE_KEY` to the project's service-role secret key and set `ADMIN_PIN` to a private value of at least 12 characters. Never put either value in GitHub, source files, or the browser bundle.
 
@@ -28,4 +29,4 @@ In the GitHub repository, open **Settings → Secrets and variables → Actions*
 
 The Pages workflow deploys the site when changes are pushed to `main`. It requires both secrets, generates `supabase-config.js`, and publishes the repository's `images/` folder with the site. Use direct image URLs, such as `https://omirek.github.io/garagesale/images/peszel.jpg`, rather than a GitHub file preview page. Publishable keys are meant for browser use; never expose the `service_role` key.
 
-The migration enables row-level security, allows public visitors to read listed items and create reservations, and denies public access to reservation contact details and inventory changes. A database trigger and unique index prevent duplicate active reservations. PIN failures are throttled to five attempts per 15 minutes per client.
+The migrations enable row-level security, allow public visitors to read listed items and create reservations, and deny public access to reservation contact details and inventory changes. A database trigger atomically checks and updates available stock when visitors reserve specific quantities. PIN failures are throttled to five attempts per 15 minutes per client.
