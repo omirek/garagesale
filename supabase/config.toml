@@ -1,0 +1,4 @@
+project_id = "zqllbflaxblvytxlihci"
+
+[functions.garage-admin]
+verify_jwt = false

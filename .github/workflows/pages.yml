@@ -1,0 +1,41 @@
+name: Deploy garage sale to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Build static site
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_URL" || { echo "Missing repository secret SUPABASE_URL"; exit 1; }
+          test -n "$SUPABASE_PUBLISHABLE_KEY" || { echo "Missing repository secret SUPABASE_PUBLISHABLE_KEY"; exit 1; }
+          mkdir dist
+          cp index.html dist/index.html
+          node -e 'require("node:fs").writeFileSync("dist/supabase-config.js", "window.GARAGE_CONFIG = " + JSON.stringify({ url: process.env.SUPABASE_URL, publishableKey: process.env.SUPABASE_PUBLISHABLE_KEY }) + ";\n")'
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

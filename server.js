@@ -148,14 +148,18 @@ const server = http.createServer(async (request, response) => {
       response.writeHead(405);
       return response.end('Niedozwolona metoda.');
     }
-    const filePath = url.pathname === '/' ? path.join(__dirname, 'index.html') : path.join(__dirname, url.pathname);
-    if (filePath !== path.join(__dirname, 'index.html')) {
+    const staticFiles = {
+      '/': ['index.html', 'text/html; charset=utf-8'],
+      '/supabase-config.js': ['supabase-config.js', 'text/javascript; charset=utf-8'],
+    };
+    const staticFile = staticFiles[url.pathname];
+    if (!staticFile) {
       response.writeHead(404);
       return response.end('Nie znaleziono.');
     }
-    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    response.writeHead(200, { 'Content-Type': staticFile[1] });
     if (request.method === 'HEAD') return response.end();
-    return response.end(fs.readFileSync(filePath));
+    return response.end(fs.readFileSync(path.join(__dirname, staticFile[0])));
   } catch (error) {
     const status = error.message === 'Żądanie jest zbyt duże.' ? 413 : 400;
     if (!response.headersSent) return sendJson(response, status, { error: error.message || 'Coś poszło nie tak.' });
