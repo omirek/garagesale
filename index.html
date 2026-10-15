@@ -79,7 +79,6 @@
     .empty-state p { max-width: 340px; margin: 8px 0 0; color: var(--muted); font-size: 13px; }
     footer { border-top: 1px solid var(--line); }
     .footer-inner { display: flex; justify-content: space-between; padding: 18px 0 24px; color: var(--muted); font-size: 11px; }
-    .storage-note { margin: 20px 0 0; border-left: 3px solid var(--coral); padding: 10px 13px; background: #f0eadb; color: var(--ink); font-size: 12px; }
     dialog { width: min(480px, calc(100% - 28px)); max-height: min(88vh, 760px); overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 0; background: var(--white); color: var(--ink); box-shadow: 0 18px 60px #20362b30; }
     dialog::backdrop { background: #14251db3; backdrop-filter: blur(2px); }
     .dialog-head { position: sticky; z-index: 1; top: 0; display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 22px 24px 16px; border-bottom: 1px solid var(--line); background: var(--white); }
@@ -172,7 +171,6 @@
       </div>
       <div class="item-grid" id="item-grid" aria-live="polite"></div>
     </section>
-    <p class="storage-note" id="storage-note" hidden>Dane są zapisywane tylko w tej przeglądarce. Inni odwiedzający nie zobaczą dodanych przedmiotów ani rezerwacji.</p>
   </main>
   <footer><div class="footer-inner"><span>Sobotnie Znaleziska</span><span>Dobrym rzeczom warto dać drugie życie.</span></div></footer>
 
@@ -245,106 +243,9 @@
     let activeItemId = null;
     let toastTimer;
     let adminPin = '';
-    let browserStorageMode = !supabaseConfigured;
-    const browserStorageKey = 'sobotnie-znaleziska-v1';
 
     function escapeHtml(value = '') {
       return String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
-    }
-
-    function enableBrowserStorage() {
-      browserStorageMode = true;
-      document.querySelector('#storage-note').hidden = false;
-    }
-
-    function readBrowserStore() {
-      try {
-        const stored = localStorage.getItem(browserStorageKey);
-        if (!stored) return { items: [], reservations: [] };
-        const data = JSON.parse(stored);
-        return {
-          items: Array.isArray(data.items) ? data.items : [],
-          reservations: Array.isArray(data.reservations) ? data.reservations : [],
-        };
-      } catch {
-        throw new Error('Nie można odczytać danych zapisanych w tej przeglądarce.');
-      }
-    }
-
-    function writeBrowserStore(store) {
-      try {
-        localStorage.setItem(browserStorageKey, JSON.stringify(store));
-      } catch {
-        throw new Error('Nie można zapisać danych w tej przeglądarce. Sprawdź dostępne miejsce.');
-      }
-    }
-
-    function createLocalId() {
-      return globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    }
-
-    function localApi(url, options = {}) {
-      const pathname = new URL(url, location.href).pathname;
-      const method = (options.method || 'GET').toUpperCase();
-      const store = readBrowserStore();
-      const body = options.body ? JSON.parse(options.body) : {};
-
-      if (method === 'GET' && pathname === '/api/items') {
-        const reservedIds = new Set(store.reservations.map((reservation) => reservation.itemId));
-        return store.items.map((item) => ({ ...item, reserved: reservedIds.has(item.id) }));
-      }
-      if (method === 'GET' && pathname === '/api/reservations') {
-        const itemsById = new Map(store.items.map((item) => [item.id, item.name]));
-        return store.reservations.map((reservation) => ({ ...reservation, itemName: itemsById.get(reservation.itemId) || 'Usunięty przedmiot' }));
-      }
-      if (method === 'POST' && pathname === '/api/items') {
-        const item = {
-          id: createLocalId(),
-          name: typeof body.name === 'string' ? body.name.trim().slice(0, 80) : '',
-          category: typeof body.category === 'string' ? body.category.trim().slice(0, 40) : 'Inne',
-          condition: typeof body.condition === 'string' ? body.condition.trim().slice(0, 40) : 'Używany',
-          description: typeof body.description === 'string' ? body.description.trim().slice(0, 500) : '',
-          imageUrl: typeof body.imageUrl === 'string' ? body.imageUrl.trim().slice(0, 500) : '',
-          createdAt: new Date().toISOString(),
-        };
-        if (!item.name) throw new Error('Wpisz nazwę przedmiotu.');
-        if (item.imageUrl && !/^https?:\/\//i.test(item.imageUrl)) throw new Error('Link do zdjęcia musi zaczynać się od http:// lub https://.');
-        store.items.unshift(item);
-        writeBrowserStore(store);
-        return item;
-      }
-      if (method === 'POST' && pathname === '/api/reservations') {
-        const item = store.items.find((entry) => entry.id === body.itemId);
-        if (!item) throw new Error('Ten przedmiot nie jest już dostępny.');
-        if (store.reservations.some((reservation) => reservation.itemId === item.id)) throw new Error('Ten przedmiot został już zarezerwowany.');
-        const name = typeof body.name === 'string' ? body.name.trim().slice(0, 80) : '';
-        const contact = typeof body.contact === 'string' ? body.contact.trim().slice(0, 120) : '';
-        if (!name || !contact) throw new Error('Podaj imię i nazwisko oraz dane kontaktowe.');
-        const reservation = { id: createLocalId(), itemId: item.id, name, contact, createdAt: new Date().toISOString() };
-        store.reservations.push(reservation);
-        writeBrowserStore(store);
-        return reservation;
-      }
-
-      const reservationMatch = pathname.match(/^\/api\/reservations\/([^/]+)$/);
-      if (method === 'DELETE' && reservationMatch) {
-        const index = store.reservations.findIndex((reservation) => reservation.id === decodeURIComponent(reservationMatch[1]));
-        if (index < 0) throw new Error('Nie znaleziono rezerwacji.');
-        store.reservations.splice(index, 1);
-        writeBrowserStore(store);
-        return { ok: true };
-      }
-      const itemMatch = pathname.match(/^\/api\/items\/([^/]+)$/);
-      if (method === 'DELETE' && itemMatch) {
-        const itemId = decodeURIComponent(itemMatch[1]);
-        if (store.reservations.some((reservation) => reservation.itemId === itemId)) throw new Error('Najpierw anuluj rezerwację tego przedmiotu.');
-        const index = store.items.findIndex((item) => item.id === itemId);
-        if (index < 0) throw new Error('Nie znaleziono przedmiotu.');
-        store.items.splice(index, 1);
-        writeBrowserStore(store);
-        return { ok: true };
-      }
-      throw new Error('Nie znaleziono.');
     }
 
     async function readSupabaseResponse(response) {
@@ -432,31 +333,9 @@
       throw new Error('Nie znaleziono.');
     }
 
-    if (browserStorageMode) enableBrowserStorage();
-
     async function api(url, options = {}) {
-      if (supabaseConfigured) return supabaseApi(url, options);
-      if (browserStorageMode) return localApi(url, options);
-      let response;
-      try {
-        response = await fetch(url, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
-      } catch {
-        enableBrowserStorage();
-        return localApi(url, options);
-      }
-      if (!(response.headers.get('content-type') || '').includes('application/json')) {
-        enableBrowserStorage();
-        return localApi(url, options);
-      }
-      let data;
-      try {
-        data = await response.json();
-      } catch {
-        enableBrowserStorage();
-        return localApi(url, options);
-      }
-      if (!response.ok) throw new Error(data.error || 'Coś poszło nie tak. Spróbuj ponownie.');
-      return data;
+      if (!supabaseConfigured) throw new Error('Strona nie jest jeszcze skonfigurowana z Supabase.');
+      return supabaseApi(url, options);
     }
 
     function showToast(message, isError = false) {
@@ -532,7 +411,7 @@
         await api('/api/reservations', { method: 'POST', body: JSON.stringify({ itemId: activeItemId, name: form.get('name'), contact: form.get('contact') }) });
         reservationDialog.close();
         await refreshItems();
-        showToast(browserStorageMode ? 'Rezerwację zapisano tylko w tej przeglądarce.' : 'Zarezerwowano. Sprzedający skontaktuje się w sprawie odbioru.');
+        showToast('Zarezerwowano. Sprzedający skontaktuje się w sprawie odbioru.');
       } catch (failure) {
         error.textContent = failure.message;
         if (failure.message.includes('zarezerwowany')) await refreshItems();
@@ -547,7 +426,7 @@
         await api('/api/items', { method: 'POST', body: JSON.stringify(Object.fromEntries(form)) });
         event.currentTarget.reset();
         await Promise.all([refreshItems(), refreshAdmin()]);
-        showToast(browserStorageMode ? 'Przedmiot dodano tylko w tej przeglądarce.' : 'Dodano przedmiot do wyprzedaży.');
+        showToast('Dodano przedmiot do wyprzedaży.');
       } catch (failure) {
         error.textContent = failure.message;
       }
@@ -559,7 +438,7 @@
       try {
         await api(`/api/reservations/${encodeURIComponent(button.dataset.release)}`, { method: 'DELETE' });
         await Promise.all([refreshItems(), refreshAdmin()]);
-        showToast(browserStorageMode ? 'Anulowano rezerwację w tej przeglądarce.' : 'Anulowano rezerwację. Przedmiot jest ponownie dostępny.');
+        showToast('Anulowano rezerwację. Przedmiot jest ponownie dostępny.');
       } catch (failure) { showToast(failure.message, true); }
     });
 
@@ -569,7 +448,7 @@
       try {
         await api(`/api/items/${encodeURIComponent(button.dataset.deleteItem)}`, { method: 'DELETE' });
         await Promise.all([refreshItems(), refreshAdmin()]);
-        showToast(browserStorageMode ? 'Usunięto przedmiot z tej przeglądarki.' : 'Usunięto przedmiot z wyprzedaży.');
+        showToast('Usunięto przedmiot z wyprzedaży.');
       } catch (failure) { showToast(failure.message, true); }
     });
 
@@ -612,9 +491,12 @@
     searchInput.addEventListener('input', renderItems);
     categoryFilter.addEventListener('change', renderItems);
 
-    refreshItems().catch(() => {
+    refreshItems().catch((failure) => {
       document.querySelector('#result-count').textContent = 'Wyprzedaż niedostępna';
-      itemGrid.innerHTML = '<div class="empty-state"><h2>Nie udało się połączyć z wyprzedażą.</h2><p>Odśwież stronę za chwilę.</p></div>';
+      const message = supabaseConfigured
+        ? 'Nie udało się połączyć z Supabase. Sprawdź ustawienia projektu i spróbuj ponownie.'
+        : 'Strona nie jest jeszcze skonfigurowana z Supabase. Administrator musi dodać klucze do GitHub Actions i wdrożyć stronę.';
+      itemGrid.innerHTML = `<div class="empty-state"><h2>Nie można załadować wyprzedaży.</h2><p>${escapeHtml(message)}${supabaseConfigured ? ` Szczegóły: ${escapeHtml(failure.message)}` : ''}</p></div>`;
     });
   </script>
 </body>

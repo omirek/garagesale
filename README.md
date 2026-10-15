@@ -4,23 +4,22 @@ A Polish-language neighborhood sale site. Supabase stores shared items and reser
 
 ## Local development
 
-Requires Node.js 18 or newer. Run `npm start` and open <http://localhost:3000>. With the empty `supabase-config.js`, the app uses browser storage for local testing only.
+Requires Node.js 18 or newer. Run `npm start` and open <http://localhost:3000>. The app always uses Supabase; with an empty `supabase-config.js`, it shows a setup error and does not save data locally.
 
 ## Supabase setup
 
-The project is `zqllbflaxblvytxlihci`. Install/use the Supabase CLI, sign in, link this project, and apply the schema:
+The project is `zqllbflaxblvytxlihci`. To create the database tables from the Supabase website:
 
-```sh
-npx supabase login
-npx supabase link --project-ref zqllbflaxblvytxlihci
-npx supabase db push
-```
+1. Open the project in the Supabase Dashboard.
+2. Go to **SQL Editor** and create a new query.
+3. Copy the complete contents of [`supabase/migrations/20261015000000_garage_sale.sql`](./supabase/migrations/20261015000000_garage_sale.sql) into the query editor and click **Run**.
+4. Open **Table Editor** and confirm that `items`, `reservations`, and `admin_pin_failures` exist in the `public` schema.
 
-In Supabase **Project Settings → API Keys**, copy the `service_role` secret key into **Edge Functions → Secrets** as `SUPABASE_SERVICE_ROLE_KEY`. Add `ADMIN_PIN` there too; choose at least 12 random characters. Never put either value in GitHub, source files, or the browser bundle. Then deploy the admin function:
+This migration also configures the access policies, indexes, triggers, and database functions required by the app. Run it once on a new project; do not rerun it if the tables already exist.
 
-```sh
-npx supabase functions deploy garage-admin
-```
+Next, deploy the admin Edge Function. In **Edge Functions**, deploy a function named `garage-admin` using the code in [`supabase/functions/garage-admin/index.ts`](./supabase/functions/garage-admin/index.ts). In **Edge Functions → Secrets**, set `SUPABASE_SERVICE_ROLE_KEY` to the project's service-role secret key and set `ADMIN_PIN` to a private value of at least 12 characters. Never put either value in GitHub, source files, or the browser bundle.
+
+In **Project Settings → API Keys**, copy the project's publishable key (starts with `sb_publishable_`) for the website setup below. Do not use the service-role key as the website's publishable key.
 
 The migration enables row-level security, allows public visitors to read listed items and create reservations, and denies public access to reservation contact details and inventory changes. A database trigger and unique index prevent duplicate active reservations. PIN failures are throttled to five attempts per 15 minutes per client.
 
