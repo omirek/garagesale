@@ -23,14 +23,3 @@ npx supabase functions deploy garage-admin
 ```
 
 The migration enables row-level security, allows public visitors to read listed items and create reservations, and denies public access to reservation contact details and inventory changes. A database trigger and unique index prevent duplicate active reservations. PIN failures are throttled to five attempts per 15 minutes per client.
-
-## GitHub Pages deployment
-
-In the repository's **Settings → Secrets and variables → Actions**, add:
-
-- `SUPABASE_URL`: `https://zqllbflaxblvytxlihci.supabase.co`
-- `SUPABASE_PUBLISHABLE_KEY`: the project's `sb_publishable_...` key
-
-Set Pages' build source to **GitHub Actions**, then push to `main` or run the Pages workflow. It generates `supabase-config.js` during deployment; the key is not committed to the repository.
-
-Publishable keys are designed to be included in browser apps, so they are visible to site visitors even when sourced from a GitHub secret. RLS and the Edge Function protect the data; the publishable key itself is not a password. Do not use a `service_role` key as a GitHub Actions secret for the site.
